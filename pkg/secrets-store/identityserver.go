@@ -19,19 +19,14 @@ package secretsstore
 import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/net/context"
-	csicommon "sigs.k8s.io/secrets-store-csi-driver/pkg/csi-common"
 
 	wrappers "github.com/golang/protobuf/ptypes/wrappers"
 )
-
-type identityServer struct {
-	*csicommon.DefaultIdentityServer
-}
 
 // Probe check whether the plugin is running or not.
 // Currently the spec does not dictate what you should return.
 // Returning ready=true as ability to connect to the driver and make Probe RPC call
 // means driver is working as expected.
-func (ids *identityServer) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
+func (s *SecretsStore) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	return &csi.ProbeResponse{Ready: &wrappers.BoolValue{Value: true}}, nil
 }

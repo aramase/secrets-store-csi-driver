@@ -38,11 +38,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func testNodeServer(t *testing.T, mountPoints []mount.MountPoint, client client.Client, reporter StatsReporter) (*nodeServer, error) {
+func testDriver(t *testing.T, mountPoints []mount.MountPoint, client client.Client, reporter StatsReporter) (*SecretsStore, error) {
 	t.Helper()
 	tmpDir := tmpdir.New(t, "", "ut")
 	providerClients := NewPluginClientBuilder(tmpDir)
-	return newNodeServer(NewFakeDriver(), tmpDir, "testnode", mount.NewFakeMounter(mountPoints), providerClients, client, reporter)
+	return NewSecretsStore(tmpDir, "testnode", mount.NewFakeMounter(mountPoints), providerClients, client, reporter)
 }
 
 func TestNodePublishVolume(t *testing.T) {
@@ -238,7 +238,7 @@ func TestNodePublishVolume(t *testing.T) {
 				test.mountPoints = append(test.mountPoints, mount.MountPoint{Path: absFile})
 			}
 			r := mocks.NewFakeReporter()
-			ns, err := testNodeServer(t, test.mountPoints, fake.NewFakeClientWithScheme(s, test.initObjects...), r)
+			ns, err := testDriver(t, test.mountPoints, fake.NewFakeClientWithScheme(s, test.initObjects...), r)
 			if err != nil {
 				t.Fatalf("expected error to be nil, got: %+v", err)
 			}
@@ -314,7 +314,7 @@ func TestMountSecretsStoreObjectContent(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ns, err := testNodeServer(t, nil, fake.NewFakeClientWithScheme(nil), mocks.NewFakeReporter())
+			ns, err := testDriver(t, nil, fake.NewFakeClientWithScheme(nil), mocks.NewFakeReporter())
 			if err != nil {
 				t.Fatalf("expected error to be nil, got: %+v", err)
 			}
@@ -389,7 +389,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			}
 
 			r := mocks.NewFakeReporter()
-			ns, err := testNodeServer(t, test.mountPoints, fake.NewFakeClientWithScheme(s), r)
+			ns, err := testDriver(t, test.mountPoints, fake.NewFakeClientWithScheme(s), r)
 			if err != nil {
 				t.Fatalf("expected error to be nil, got: %+v", err)
 			}

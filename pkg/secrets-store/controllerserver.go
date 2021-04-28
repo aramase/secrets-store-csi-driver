@@ -16,27 +16,19 @@ package secretsstore
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	csicommon "sigs.k8s.io/secrets-store-csi-driver/pkg/csi-common"
 
 	"golang.org/x/net/context"
 )
 
-type controllerServer struct {
-	*csicommon.DefaultControllerServer
-	mu   sync.Mutex
-	vols map[string]csi.Volume
-}
-
 var counter uint64
 
-func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	if err := cs.Driver.ValidateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
+func (s *SecretsStore) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	if err := s.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
 		return nil, err
 	}
 	if len(req.GetName()) == 0 {
@@ -55,7 +47,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	volumeContext["providerName"] = "mock_provider"
 
 	// check if volume with same name exists
-	existingVol, exists := cs.findVolumeByName(volName)
+	existingVol, exists := s.findVolumeByName(volName)
 	// if volume exists and capacity is different then error
 	if exists && existingVol.CapacityBytes != capacityBytes {
 		return nil, status.Error(codes.AlreadyExists, "volume with same name and diff capacity exists")
@@ -70,12 +62,12 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		VolumeContext: volumeContext,
 	}
 
-	cs.addVolume(volName, newVolume)
+	s.addVolume(volName, newVolume)
 	return &csi.CreateVolumeResponse{Volume: &newVolume}, nil
 }
 
-func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	if err := cs.Driver.ValidateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
+func (s *SecretsStore) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	if err := s.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
 		return nil, err
 	}
 	if len(req.GetVolumeId()) == 0 {
@@ -84,7 +76,7 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+func (s *SecretsStore) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id missing in request")
 	}
@@ -92,42 +84,42 @@ func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 		return nil, status.Error(codes.InvalidArgument, "volume_capabilities is empty")
 	}
 	reqVolID := req.GetVolumeId()
-	if _, exists := cs.findVolumeByID(reqVolID); exists {
+	if _, exists := s.findVolumeByID(reqVolID); exists {
 		return &csi.ValidateVolumeCapabilitiesResponse{}, nil
 	}
 	return nil, status.Error(codes.NotFound, reqVolID)
 }
 
-func (cs *controllerServer) findVolumeByName(volName string) (csi.Volume, bool) {
-	return cs.findVolume("name", volName)
+func (s *SecretsStore) findVolumeByName(volName string) (csi.Volume, bool) {
+	return s.findVolume("name", volName)
 }
 
-func (cs *controllerServer) findVolumeByID(volID string) (csi.Volume, bool) {
-	return cs.findVolume("id", volID)
+func (s *SecretsStore) findVolumeByID(volID string) (csi.Volume, bool) {
+	return s.findVolume("id", volID)
 }
 
-func (cs *controllerServer) addVolume(name string, vol csi.Volume) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+func (s *SecretsStore) addVolume(name string, vol csi.Volume) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	cs.vols[name] = vol
+	s.vols[name] = vol
 }
 
-func (cs *controllerServer) findVolume(key, nameOrID string) (csi.Volume, bool) {
-	return cs.findVolumeInternal(key, nameOrID)
+func (s *SecretsStore) findVolume(key, nameOrID string) (csi.Volume, bool) {
+	return s.findVolumeInternal(key, nameOrID)
 }
 
-func (cs *controllerServer) findVolumeInternal(key, nameOrID string) (csi.Volume, bool) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+func (s *SecretsStore) findVolumeInternal(key, nameOrID string) (csi.Volume, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	switch key {
 	case "name":
-		vol, ok := cs.vols[nameOrID]
+		vol, ok := s.vols[nameOrID]
 		return vol, ok
 
 	case "id":
-		for _, vol := range cs.vols {
+		for _, vol := range s.vols {
 			if strings.EqualFold(nameOrID, vol.VolumeId) {
 				return vol, true
 			}
@@ -142,4 +134,22 @@ func isMockProvider(provider string) bool {
 
 func isMockTargetPath(targetPath string) bool {
 	return strings.EqualFold(targetPath, "/tmp/csi/mount")
+}
+
+func (s *SecretsStore) validateControllerServiceRequest(c csi.ControllerServiceCapability_RPC_Type) error {
+	if c == csi.ControllerServiceCapability_RPC_UNKNOWN {
+		return nil
+	}
+
+	for _, cap := range s.getControllerServiceCapabilities() {
+		if c == cap.GetRpc().GetType() {
+			return nil
+		}
+	}
+	return status.Error(codes.InvalidArgument, c.String())
+}
+
+func (s *SecretsStore) getControllerServiceCapabilities() []*csi.ControllerServiceCapability {
+	var csc []*csi.ControllerServiceCapability
+	return csc
 }

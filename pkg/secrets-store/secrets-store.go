@@ -18,6 +18,7 @@ package secretsstore
 
 import (
 	"context"
+	"sync"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/utils/mount"
@@ -33,40 +34,30 @@ import (
 // SecretsStore implements the IdentityServer, ControllerServer and
 // NodeServer CSI interfaces.
 type SecretsStore struct {
-	driver *csicommon.CSIDriver
-	ns     *nodeServer
-	cs     *controllerServer
-	ids    *identityServer
+	providerVolumePath string
+	mounter            mount.Interface
+	reporter           StatsReporter
+	nodeID             string
+	client             client.Client
+	providerClients    *PluginClientBuilder
+
+	// mutex and volumes are used by controllerserver
+	mu   sync.Mutex
+	vols map[string]csi.Volume
 }
 
-// GetDriver returns a new secrets store driver
-func GetDriver() *SecretsStore {
-	return &SecretsStore{}
-}
-
-func newNodeServer(d *csicommon.CSIDriver, providerVolumePath, nodeID string, mounter mount.Interface, providerClients *PluginClientBuilder, client client.Client, statsReporter StatsReporter) (*nodeServer, error) {
-	return &nodeServer{
-		DefaultNodeServer:  csicommon.NewDefaultNodeServer(d),
+// NewSecretsStore returns a new secrets store driver
+func NewSecretsStore(providerVolumePath, nodeID string, mounter mount.Interface, providerClients *PluginClientBuilder, client client.Client, statsReporter StatsReporter) (*SecretsStore, error) {
+	return &SecretsStore{
 		providerVolumePath: providerVolumePath,
 		mounter:            mounter,
 		reporter:           statsReporter,
 		nodeID:             nodeID,
 		client:             client,
 		providerClients:    providerClients,
+		mu:                 sync.Mutex{},
+		vols:               make(map[string]csi.Volume),
 	}, nil
-}
-
-func newControllerServer(d *csicommon.CSIDriver) *controllerServer {
-	return &controllerServer{
-		DefaultControllerServer: csicommon.NewDefaultControllerServer(d),
-		vols:                    make(map[string]csi.Volume),
-	}
-}
-
-func newIdentityServer(d *csicommon.CSIDriver) *identityServer {
-	return &identityServer{
-		DefaultIdentityServer: csicommon.NewDefaultIdentityServer(d),
-	}
 }
 
 // Run starts the CSI plugin
@@ -76,30 +67,8 @@ func (s *SecretsStore) Run(ctx context.Context, driverName, nodeID, endpoint, pr
 	klog.Infof("Provider Volume Path: %s", providerVolumePath)
 	klog.Infof("GRPC supported providers will be dynamically created")
 
-	// Initialize default library driver
-	s.driver = csicommon.NewCSIDriver(driverName, version.BuildVersion, nodeID)
-	if s.driver == nil {
-		klog.Fatal("Failed to initialize SecretsStore CSI Driver.")
-	}
-	s.driver.AddControllerServiceCapabilities(
-		[]csi.ControllerServiceCapability_RPC_Type{
-			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-		})
-	s.driver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{
-		csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY,
-		csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
-	})
-
-	ns, err := newNodeServer(s.driver, providerVolumePath, nodeID, mount.New(""), providerClients, client, NewStatsReporter())
-	if err != nil {
-		klog.Fatalf("failed to initialize node server, error: %+v", err)
-	}
-
-	s.ns = ns
-	s.cs = newControllerServer(s.driver)
-	s.ids = newIdentityServer(s.driver)
-
 	server := csicommon.NewNonBlockingGRPCServer()
-	server.Start(ctx, endpoint, s.ids, s.cs, s.ns)
+	// s implements ControllerServer, NodeServer and IdentityServer
+	server.Start(ctx, endpoint, s, s, s)
 	server.Wait()
 }

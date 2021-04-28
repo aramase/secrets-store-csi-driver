@@ -27,14 +27,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/mount"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/secrets-store-csi-driver/apis/v1alpha1"
 )
 
 // ensureMountPoint ensures mount point is valid
-func (ns *nodeServer) ensureMountPoint(target string) (bool, error) {
-	notMnt, err := ns.mounter.IsLikelyNotMountPoint(target)
+func ensureMountPoint(mounter mount.Interface, target string) (bool, error) {
+	notMnt, err := mounter.IsLikelyNotMountPoint(target)
 	if err != nil {
 		return !notMnt, err
 	}
@@ -47,7 +48,7 @@ func (ns *nodeServer) ensureMountPoint(target string) (bool, error) {
 			// already mounted
 			return !notMnt, nil
 		}
-		if err := ns.mounter.Unmount(target); err != nil {
+		if err := mounter.Unmount(target); err != nil {
 			klog.ErrorS(err, "failed to unmount directory", "targetPath", target)
 			return !notMnt, err
 		}

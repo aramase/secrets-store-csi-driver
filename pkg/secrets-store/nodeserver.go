@@ -23,7 +23,6 @@ import (
 	"os"
 	"runtime"
 
-	csicommon "sigs.k8s.io/secrets-store-csi-driver/pkg/csi-common"
 	internalerrors "sigs.k8s.io/secrets-store-csi-driver/pkg/errors"
 	"sigs.k8s.io/secrets-store-csi-driver/pkg/util/fileutil"
 
@@ -33,18 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/mount"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-type nodeServer struct {
-	*csicommon.DefaultNodeServer
-	providerVolumePath string
-	mounter            mount.Interface
-	reporter           StatsReporter
-	nodeID             string
-	client             client.Client
-	providerClients    *PluginClientBuilder
-}
 
 const (
 	permission os.FileMode = 0644
@@ -56,7 +44,7 @@ const (
 	secretProviderClassField = "secretProviderClass"
 )
 
-func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (npvr *csi.NodePublishVolumeResponse, err error) {
+func (s *SecretsStore) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (npvr *csi.NodePublishVolumeResponse, err error) {
 	var parameters map[string]string
 	var providerName string
 	var podName, podNamespace, podUID string
@@ -71,12 +59,12 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 			// again for mount, entire node publish volume is retried
 			if targetPath != "" && mounted {
 				klog.InfoS("unmounting target path as node publish volume failed", "targetPath", targetPath, "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
-				ns.mounter.Unmount(targetPath)
+				s.mounter.Unmount(targetPath)
 			}
-			ns.reporter.ReportNodePublishErrorCtMetric(providerName, errorReason)
+			s.reporter.ReportNodePublishErrorCtMetric(providerName, errorReason)
 			return
 		}
-		ns.reporter.ReportNodePublishCtMetric(providerName)
+		s.reporter.ReportNodePublishCtMetric(providerName)
 	}()
 
 	// Check arguments
@@ -105,7 +93,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	podNamespace = attrib[csipodnamespace]
 	podUID = attrib[csipoduid]
 
-	mounted, err = ns.ensureMountPoint(targetPath)
+	mounted, err = ensureMountPoint(s.mounter, targetPath)
 	if err != nil {
 		// kubelet will not create the CSI NodePublishVolume target directory in 1.20+, in accordance with the CSI specification.
 		// CSI driver needs to properly create and process the target path
@@ -127,7 +115,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	if isMockProvider(providerName) {
 		// mock provider is used only for running sanity tests against the driver
-		err := ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
+		err := s.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
 		if err != nil {
 			klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
 			return nil, err
@@ -140,7 +128,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, fmt.Errorf("secretProviderClass is not set")
 	}
 
-	spc, err := getSecretProviderItem(ctx, ns.client, secretProviderClass, podNamespace)
+	spc, err := getSecretProviderItem(ctx, s.client, secretProviderClass, podNamespace)
 	if err != nil {
 		errorReason = internalerrors.SecretProviderClassNotFound
 		return nil, err
@@ -184,7 +172,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	// In linux Mount tmpfs mounts tmpfs to targetPath
 	// In windows Mount tmpfs checks if the targetPath exists and if not, will create the target path
 	// https://github.com/kubernetes/utils/blob/master/mount/mount_windows.go#L68-L71
-	err = ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
+	err = s.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
 	if err != nil {
 		errorReason = internalerrors.FailedToMount
 		klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
@@ -192,12 +180,12 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 	mounted = true
 	var objectVersions map[string]string
-	if objectVersions, errorReason, err = ns.mountSecretsStoreObjectContent(ctx, providerName, string(parametersStr), string(secretStr), targetPath, string(permissionStr), podName); err != nil {
+	if objectVersions, errorReason, err = s.mountSecretsStoreObjectContent(ctx, providerName, string(parametersStr), string(secretStr), targetPath, string(permissionStr), podName); err != nil {
 		return nil, fmt.Errorf("failed to mount secrets store objects for pod %s/%s, err: %v", podNamespace, podName, err)
 	}
 
 	// create the secret provider class pod status object
-	if err = createSecretProviderClassPodStatus(ctx, ns.client, podName, podNamespace, podUID, secretProviderClass, targetPath, ns.nodeID, true, objectVersions); err != nil {
+	if err = createSecretProviderClassPodStatus(ctx, s.client, podName, podNamespace, podUID, secretProviderClass, targetPath, s.nodeID, true, objectVersions); err != nil {
 		return nil, fmt.Errorf("failed to create secret provider class pod status for pod %s/%s, err: %v", podNamespace, podName, err)
 	}
 
@@ -205,13 +193,13 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (nuvr *csi.NodeUnpublishVolumeResponse, err error) {
+func (s *SecretsStore) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (nuvr *csi.NodeUnpublishVolumeResponse, err error) {
 	defer func() {
 		if err != nil {
-			ns.reporter.ReportNodeUnPublishErrorCtMetric()
+			s.reporter.ReportNodeUnPublishErrorCtMetric()
 			return
 		}
-		ns.reporter.ReportNodeUnPublishCtMetric()
+		s.reporter.ReportNodeUnPublishCtMetric()
 	}()
 
 	// Check arguments
@@ -239,7 +227,7 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 			}
 		}
 	}
-	err = mount.CleanupMountPoint(targetPath, ns.mounter, false)
+	err = mount.CleanupMountPoint(targetPath, s.mounter, false)
 	if err != nil && !os.IsNotExist(err) {
 		klog.ErrorS(err, "failed to clean and unmount target path", "targetPath", targetPath)
 		return nil, status.Error(codes.Internal, err.Error())
@@ -249,7 +237,7 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
-func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+func (s *SecretsStore) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -261,7 +249,7 @@ func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+func (s *SecretsStore) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -273,7 +261,7 @@ func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-func (ns *nodeServer) mountSecretsStoreObjectContent(ctx context.Context, providerName, attributes, secrets, targetPath, permission, podName string) (map[string]string, string, error) {
+func (s *SecretsStore) mountSecretsStoreObjectContent(ctx context.Context, providerName, attributes, secrets, targetPath, permission, podName string) (map[string]string, string, error) {
 	if len(attributes) == 0 {
 		return nil, "", errors.New("missing attributes")
 	}
@@ -284,12 +272,12 @@ func (ns *nodeServer) mountSecretsStoreObjectContent(ctx context.Context, provid
 		return nil, "", errors.New("missing file permissions")
 	}
 	// get provider volume path
-	providerVolumePath := ns.providerVolumePath
+	providerVolumePath := s.providerVolumePath
 	if providerVolumePath == "" {
 		return nil, "", fmt.Errorf("providers volume path not found. Set PROVIDERS_VOLUME_PATH")
 	}
 
-	client, err := ns.providerClients.Get(ctx, providerName)
+	client, err := s.providerClients.Get(ctx, providerName)
 	if err != nil {
 		return nil, "", fmt.Errorf("error connecting to provider %q: %w", providerName, err)
 	}
@@ -299,6 +287,6 @@ func (ns *nodeServer) mountSecretsStoreObjectContent(ctx context.Context, provid
 	return MountContent(ctx, client, attributes, secrets, targetPath, permission, nil)
 }
 
-func (ns *nodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
+func (s *SecretsStore) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "NodeExpandVolume is not implemented")
 }
