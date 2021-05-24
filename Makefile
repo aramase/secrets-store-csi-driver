@@ -410,3 +410,21 @@ promote-staging-manifest: #promote staging manifests to release dir
 	@helm repo index ./charts/tmp --url https://raw.githubusercontent.com/kubernetes-sigs/secrets-store-csi-driver/master/charts --merge ./charts/index.yaml
 	@mv ./charts/tmp/* ./charts
 	@rm -rf ./charts/tmp
+
+
+## --------------------------------------
+## E2E testing
+## --------------------------------------
+E2E_TEST_BIN := e2e.test
+E2E_TEST := $(BIN_DIR)/$(E2E_TEST_BIN)
+
+$(E2E_TEST):
+	go test -tags=e2e -c ./test/e2e -o $(E2E_TEST)
+
+# E2E configurations
+E2E_ARGS ?=
+KUBECONFIG ?= $(HOME)/.kube/config
+.PHONY: test-e2e-run-azure
+test-e2e-run-azure: $(E2E_TEST) $(GINKGO)
+	$(GINKGO) -v -trace $(GINKGO_ARGS) \
+		$(E2E_TEST) -- -kubeconfig=$(KUBECONFIG) -e2e.provider=azure $(E2E_ARGS)
