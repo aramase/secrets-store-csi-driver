@@ -118,22 +118,20 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 			return nil, status.Errorf(codes.Internal, "failed to check if target path %s is mount point, err: %v", targetPath, err)
 		}
 	}
-	if mounted {
-		klog.InfoS("target path is already mounted", "targetPath", targetPath, "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
-		return &csi.NodePublishVolumeResponse{}, nil
-	}
 
 	klog.V(2).InfoS("node publish volume", "target", targetPath, "volumeId", volumeID, "attributes", attrib, "mount flags", mountFlags)
 
 	if isMockProvider(providerName) {
-		// mock provider is used only for running sanity tests against the driver
-		err := ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
-		if err != nil {
-			klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
-			return nil, err
+		if !mounted {
+			// mock provider is used only for running sanity tests against the driver
+			err := ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
+			if err != nil {
+				klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
+				return nil, err
+			}
+			klog.Infof("skipping calling provider as it's mock")
+			return &csi.NodePublishVolumeResponse{}, nil
 		}
-		klog.Infof("skipping calling provider as it's mock")
-		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
 	if secretProviderClass == "" {
@@ -154,10 +152,10 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	if err != nil {
 		return nil, err
 	}
-	parameters[csipodname] = attrib[csipodname]
-	parameters[csipodnamespace] = attrib[csipodnamespace]
-	parameters[csipoduid] = attrib[csipoduid]
-	parameters[csipodsa] = attrib[csipodsa]
+	// add all the attributes provided as part of NodePublishVolume to provider
+	for k, v := range attrib {
+		parameters[k] = v
+	}
 
 	// ensure it's read-only
 	if !req.GetReadonly() {
@@ -180,15 +178,17 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, err
 	}
 
-	// mount before providers can write content to it
-	// In linux Mount tmpfs mounts tmpfs to targetPath
-	// In windows Mount tmpfs checks if the targetPath exists and if not, will create the target path
-	// https://github.com/kubernetes/utils/blob/master/mount/mount_windows.go#L68-L71
-	err = ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
-	if err != nil {
-		errorReason = internalerrors.FailedToMount
-		klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
-		return nil, err
+	if !mounted {
+		// mount before providers can write content to it
+		// In linux Mount tmpfs mounts tmpfs to targetPath
+		// In windows Mount tmpfs checks if the targetPath exists and if not, will create the target path
+		// https://github.com/kubernetes/utils/blob/master/mount/mount_windows.go#L68-L71
+		err = ns.mounter.Mount("tmpfs", targetPath, "tmpfs", []string{})
+		if err != nil {
+			errorReason = internalerrors.FailedToMount
+			klog.ErrorS(err, "failed to mount", "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
+			return nil, err
+		}
 	}
 	mounted = true
 	var objectVersions map[string]string
@@ -196,8 +196,8 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, fmt.Errorf("failed to mount secrets store objects for pod %s/%s, err: %v", podNamespace, podName, err)
 	}
 
-	// create the secret provider class pod status object
-	if err = createSecretProviderClassPodStatus(ctx, ns.client, podName, podNamespace, podUID, secretProviderClass, targetPath, ns.nodeID, true, objectVersions); err != nil {
+	// create or update the secret provider class pod status object
+	if err = createOrUpdateSecretProviderClassPodStatus(ctx, ns.client, podName, podNamespace, podUID, secretProviderClass, targetPath, ns.nodeID, true, objectVersions); err != nil {
 		return nil, fmt.Errorf("failed to create secret provider class pod status for pod %s/%s, err: %v", podNamespace, podName, err)
 	}
 

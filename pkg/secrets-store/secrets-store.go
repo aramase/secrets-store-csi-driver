@@ -20,14 +20,12 @@ import (
 	"context"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"k8s.io/klog/v2"
 	mount "k8s.io/mount-utils"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	csicommon "sigs.k8s.io/secrets-store-csi-driver/pkg/csi-common"
 	"sigs.k8s.io/secrets-store-csi-driver/pkg/version"
-
-	"k8s.io/klog/v2"
 )
 
 // SecretsStore implements the IdentityServer, ControllerServer and

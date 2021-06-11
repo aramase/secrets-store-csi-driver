@@ -20,14 +20,15 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 
 	"context"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"sigs.k8s.io/secrets-store-csi-driver/apis/v1alpha1"
 )
@@ -87,44 +88,50 @@ func getSecretProviderItem(ctx context.Context, c client.Client, name, namespace
 	return spc, nil
 }
 
-// createSecretProviderClassPodStatus creates secret provider class pod status
-func createSecretProviderClassPodStatus(ctx context.Context, c client.Client, podname, namespace, podUID, spcName, targetPath, nodeID string, mounted bool, objects map[string]string) error {
+// createOrUpdateSecretProviderClassPodStatus creates secret provider class pod status if not exists.
+// if the secret provider class pod status already exists, it'll update the status and owner references.
+func createOrUpdateSecretProviderClassPodStatus(ctx context.Context, c client.Client, podname, namespace, podUID, spcName, targetPath, nodeID string, mounted bool, objects map[string]string) error {
 	var o []v1alpha1.SecretProviderClassObject
+	spcpsName := podname + "-" + namespace + "-" + spcName
 	for k, v := range objects {
 		o = append(o, v1alpha1.SecretProviderClassObject{ID: k, Version: v})
 	}
+	// sort the map on keys to keep the order of objects in status consistent across updates
+	sort.Slice(o, func(i, j int) bool {
+		return o[i].ID < o[j].ID
+	})
 
 	spcPodStatus := &v1alpha1.SecretProviderClassPodStatus{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podname + "-" + namespace + "-" + spcName,
+			Name:      spcpsName,
 			Namespace: namespace,
 			Labels:    map[string]string{v1alpha1.InternalNodeLabel: nodeID},
 		},
-		Status: v1alpha1.SecretProviderClassPodStatusStatus{
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, c, spcPodStatus, func() error {
+		// set/update the objects and status in spcps
+		spcPodStatus.Status = v1alpha1.SecretProviderClassPodStatusStatus{
 			PodName:                 podname,
 			TargetPath:              targetPath,
 			Mounted:                 mounted,
 			SecretProviderClassName: spcName,
 			Objects:                 o,
-		},
-	}
-	// Set owner reference to the pod as the mapping between secret provider class pod status and
-	// pod is 1 to 1. When pod is deleted, the spc pod status will automatically be garbage collected
-	spcPodStatus.SetOwnerReferences([]metav1.OwnerReference{
-		{
-			APIVersion: "v1",
-			Kind:       "Pod",
-			Name:       podname,
-			UID:        types.UID(podUID),
-		},
+		}
+		// Set owner reference to the pod as the mapping between secret provider class pod status and
+		// pod is 1 to 1. When pod is deleted, the spc pod status will automatically be garbage collected
+		spcPodStatus.SetOwnerReferences([]metav1.OwnerReference{
+			{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       podname,
+				UID:        types.UID(podUID),
+			},
+		})
+		return nil
 	})
 
-	// create the secret provider class pod status
-	err := c.Create(ctx, spcPodStatus, &client.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	return nil
+	return err
 }
 
 // getProviderFromSPC returns the provider as defined in SecretProviderClass
