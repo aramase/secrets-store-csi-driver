@@ -129,10 +129,6 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 			return nil, status.Errorf(codes.Internal, "failed to check if target path %s is mount point, err: %v", targetPath, err)
 		}
 	}
-	if mounted {
-		klog.InfoS("target path is already mounted", "targetPath", targetPath, "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
-		return &csi.NodePublishVolumeResponse{}, nil
-	}
 
 	klog.V(2).InfoS("node publish volume", "target", targetPath, "volumeId", volumeID, "attributes", attrib, "mount flags", mountFlags)
 
