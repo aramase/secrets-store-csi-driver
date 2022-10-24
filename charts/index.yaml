@@ -3,10 +3,10 @@ entries:
   secrets-store-csi-driver:
   - apiVersion: v2
     appVersion: 1.2.4
-    created: "2022-09-08T17:26:55.146535326Z"
+    created: "2022-10-24T23:35:36.490028509Z"
     description: A Helm chart to install the SecretsStore CSI Driver inside a Kubernetes
       cluster.
-    digest: a38076f1872e92dcbc5596fb5940883574ec4ccafdd4751dbe96f78f45b0ae68
+    digest: 31e5cbff569abcff504cb39081cc83c4eea5f0883245a28bdbbe588397125bc6
     icon: https://github.com/kubernetes/kubernetes/blob/master/logo/logo.png
     kubeVersion: '>=1.16.0-0'
     maintainers:
@@ -528,4 +528,4 @@ entries:
     urls:
     - https://aramase.github.io/secrets-store-csi-driver/charts/secrets-store-csi-driver-0.0.9.tgz
     version: 0.0.9
-generated: "2022-09-08T17:26:55.109298787Z"
+generated: "2022-10-24T23:35:36.488025805Z"
