@@ -34,7 +34,7 @@ var (
 	nodePublishErrorTotal   metric.Int64Counter
 	nodeUnPublishErrorTotal metric.Int64Counter
 	syncK8sSecretTotal      metric.Int64Counter
-	syncK8sSecretDuration   metric.Float64ValueRecorder
+	syncK8sSecretDuration   metric.Float64Histogram
 	runtimeOS               = runtime.GOOS
 )
 
@@ -58,7 +58,7 @@ func NewStatsReporter() StatsReporter {
 	nodePublishErrorTotal = metric.Must(meter).NewInt64Counter("total_node_publish_error", metric.WithDescription("Total number of node publish calls with error"))
 	nodeUnPublishErrorTotal = metric.Must(meter).NewInt64Counter("total_node_unpublish_error", metric.WithDescription("Total number of node unpublish calls with error"))
 	syncK8sSecretTotal = metric.Must(meter).NewInt64Counter("total_sync_k8s_secret", metric.WithDescription("Total number of k8s secrets synced"))
-	syncK8sSecretDuration = metric.Must(meter).NewFloat64ValueRecorder("sync_k8s_secret_duration_sec", metric.WithDescription("Distribution of how long it took to sync k8s secret"))
+	syncK8sSecretDuration = metric.Must(meter).NewFloat64Histogram("sync_k8s_secret_duration_sec", metric.WithDescription("Distribution of how long it took to sync k8s secret"))
 	return &reporter{meter: meter}
 }
 

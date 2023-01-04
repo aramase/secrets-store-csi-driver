@@ -18,16 +18,35 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	otProm "go.opentelemetry.io/otel/exporters/metric/prometheus"
+	otProm "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/sdk/metric/aggregator/histogram"
+	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
+	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
+	selector "go.opentelemetry.io/otel/sdk/metric/selector/simple"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 func initPrometheusExporter() error {
-	_, err := otProm.InstallNewPipeline(otProm.Config{
-		Registry: metrics.Registry.(*prometheus.Registry), // using the controller-runtime prometheus metrics registry
-		DefaultHistogramBoundaries: []float64{
-			0.1, 0.2, 0.3, 0.4, 0.5, 1, 1.5, 2, 2.5, 3.0, 5.0, 10.0, 15.0, 30.0,
-		}})
+	config := otProm.Config{
+		Registry: metrics.Registry.(*prometheus.Registry), // use the controller runtime metrics registry / gatherer
+	}
+	c := controller.New(
+		processor.NewFactory(
+			selector.NewWithHistogramDistribution(
+				histogram.WithExplicitBoundaries(config.DefaultHistogramBoundaries),
+			),
+			aggregation.CumulativeTemporalitySelector(),
+			processor.WithMemory(true),
+		),
+	)
 
-	return err
+	exporter, err := otProm.New(config, c)
+	if err != nil {
+		return err
+	}
+	global.SetMeterProvider(exporter.MeterProvider())
+
+	return nil
 }

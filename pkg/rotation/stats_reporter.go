@@ -32,7 +32,7 @@ var (
 	rotatedKey                  = "rotated"
 	rotationReconcileTotal      metric.Int64Counter
 	rotationReconcileErrorTotal metric.Int64Counter
-	rotationReconcileDuration   metric.Float64ValueRecorder
+	rotationReconcileDuration   metric.Float64Histogram
 	runtimeOS                   = runtime.GOOS
 )
 
@@ -50,7 +50,7 @@ func newStatsReporter() StatsReporter {
 	meter := global.Meter("secretsstore")
 	rotationReconcileTotal = metric.Must(meter).NewInt64Counter("total_rotation_reconcile", metric.WithDescription("Total number of rotation reconciles"))
 	rotationReconcileErrorTotal = metric.Must(meter).NewInt64Counter("total_rotation_reconcile_error", metric.WithDescription("Total number of rotation reconciles with error"))
-	rotationReconcileDuration = metric.Must(meter).NewFloat64ValueRecorder("rotation_reconcile_duration_sec", metric.WithDescription("Distribution of how long it took to rotate secrets-store content for pods"))
+	rotationReconcileDuration = metric.Must(meter).NewFloat64Histogram("rotation_reconcile_duration_sec", metric.WithDescription("Distribution of how long it took to rotate secrets-store content for pods"))
 	return &reporter{meter: meter}
 }
 
