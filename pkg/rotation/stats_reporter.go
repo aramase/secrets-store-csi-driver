@@ -21,8 +21,8 @@ import (
 	"runtime"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/metric/instrument"
 )
 
 var (
@@ -30,40 +30,43 @@ var (
 	errorKey                    = "error_type"
 	osTypeKey                   = "os_type"
 	rotatedKey                  = "rotated"
-	rotationReconcileTotal      metric.Int64Counter
-	rotationReconcileErrorTotal metric.Int64Counter
-	rotationReconcileDuration   metric.Float64ValueRecorder
+	rotationReconcileTotal      instrument.Int64Counter
+	rotationReconcileErrorTotal instrument.Int64Counter
+	rotationReconcileDuration   instrument.Float64Histogram
 	runtimeOS                   = runtime.GOOS
 )
 
-type reporter struct {
-	meter metric.Meter
-}
+type reporter struct{}
 
 type StatsReporter interface {
-	reportRotationCtMetric(provider string, wasRotated bool)
-	reportRotationErrorCtMetric(provider, errType string, wasRotated bool)
-	reportRotationDuration(duration float64)
+	reportRotationCtMetric(ctx context.Context, provider string, wasRotated bool)
+	reportRotationErrorCtMetric(ctx context.Context, provider, errType string, wasRotated bool)
+	reportRotationDuration(ctx context.Context, duration float64)
 }
 
-func newStatsReporter() StatsReporter {
+func newStatsReporter() (StatsReporter, error) {
+	var err error
 	meter := global.Meter("secretsstore")
-	rotationReconcileTotal = metric.Must(meter).NewInt64Counter("total_rotation_reconcile", metric.WithDescription("Total number of rotation reconciles"))
-	rotationReconcileErrorTotal = metric.Must(meter).NewInt64Counter("total_rotation_reconcile_error", metric.WithDescription("Total number of rotation reconciles with error"))
-	rotationReconcileDuration = metric.Must(meter).NewFloat64ValueRecorder("rotation_reconcile_duration_sec", metric.WithDescription("Distribution of how long it took to rotate secrets-store content for pods"))
-	return &reporter{meter: meter}
+	if rotationReconcileTotal, err = meter.Int64Counter("total_rotation_reconcile", instrument.WithDescription("Total number of rotation reconciles")); err != nil {
+		return nil, err
+	}
+	if rotationReconcileErrorTotal, err = meter.Int64Counter("total_rotation_reconcile_error", instrument.WithDescription("Total number of rotation reconciles with error")); err != nil {
+		return nil, err
+	}
+	if rotationReconcileDuration, err = meter.Float64Histogram("rotation_reconcile_duration_sec", instrument.WithDescription("Distribution of how long it took to rotate secrets-store content for pods")); err != nil {
+		return nil, err
+	}
+	return &reporter{}, nil
 }
 
-func (r *reporter) reportRotationCtMetric(provider string, wasRotated bool) {
-	labels := []attribute.KeyValue{attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS), attribute.Bool(rotatedKey, wasRotated)}
-	rotationReconcileTotal.Add(context.Background(), 1, labels...)
+func (r *reporter) reportRotationCtMetric(ctx context.Context, provider string, wasRotated bool) {
+	rotationReconcileTotal.Add(ctx, 1, attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS), attribute.Bool(rotatedKey, wasRotated))
 }
 
-func (r *reporter) reportRotationErrorCtMetric(provider, errType string, wasRotated bool) {
-	labels := []attribute.KeyValue{attribute.String(providerKey, provider), attribute.String(errorKey, errType), attribute.String(osTypeKey, runtimeOS), attribute.Bool(rotatedKey, wasRotated)}
-	rotationReconcileErrorTotal.Add(context.Background(), 1, labels...)
+func (r *reporter) reportRotationErrorCtMetric(ctx context.Context, provider, errType string, wasRotated bool) {
+	rotationReconcileErrorTotal.Add(ctx, 1, attribute.String(providerKey, provider), attribute.String(errorKey, errType), attribute.String(osTypeKey, runtimeOS), attribute.Bool(rotatedKey, wasRotated))
 }
 
-func (r *reporter) reportRotationDuration(duration float64) {
-	r.meter.RecordBatch(context.Background(), []attribute.KeyValue{attribute.String(osTypeKey, runtimeOS)}, rotationReconcileDuration.Measurement(duration))
+func (r *reporter) reportRotationDuration(ctx context.Context, duration float64) {
+	rotationReconcileDuration.Record(ctx, duration, attribute.String(osTypeKey, runtimeOS))
 }

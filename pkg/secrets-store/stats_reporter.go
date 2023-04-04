@@ -21,70 +21,78 @@ import (
 	"runtime"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/metric/instrument"
 )
 
 var (
 	providerKey             = "provider"
 	errorKey                = "error_type"
 	osTypeKey               = "os_type"
-	nodePublishTotal        metric.Int64Counter
-	nodeUnPublishTotal      metric.Int64Counter
-	nodePublishErrorTotal   metric.Int64Counter
-	nodeUnPublishErrorTotal metric.Int64Counter
-	syncK8sSecretTotal      metric.Int64Counter
-	syncK8sSecretDuration   metric.Float64ValueRecorder
+	nodePublishTotal        instrument.Int64Counter
+	nodeUnPublishTotal      instrument.Int64Counter
+	nodePublishErrorTotal   instrument.Int64Counter
+	nodeUnPublishErrorTotal instrument.Int64Counter
+	syncK8sSecretTotal      instrument.Int64Counter
+	syncK8sSecretDuration   instrument.Float64Histogram
 	runtimeOS               = runtime.GOOS
 )
 
-type reporter struct {
-	meter metric.Meter
-}
+type reporter struct{}
 
 type StatsReporter interface {
-	ReportNodePublishCtMetric(provider string)
-	ReportNodeUnPublishCtMetric()
-	ReportNodePublishErrorCtMetric(provider, errType string)
-	ReportNodeUnPublishErrorCtMetric()
-	ReportSyncK8SecretCtMetric(provider string, count int)
-	ReportSyncK8SecretDuration(duration float64)
+	ReportNodePublishCtMetric(ctx context.Context, provider string)
+	ReportNodeUnPublishCtMetric(ctx context.Context)
+	ReportNodePublishErrorCtMetric(ctx context.Context, provider, errType string)
+	ReportNodeUnPublishErrorCtMetric(ctx context.Context)
+	ReportSyncK8SecretCtMetric(ctx context.Context, provider string, count int)
+	ReportSyncK8SecretDuration(ctx context.Context, duration float64)
 }
 
-func NewStatsReporter() StatsReporter {
+func NewStatsReporter() (StatsReporter, error) {
+	var err error
 	meter := global.Meter("secretsstore")
-	nodePublishTotal = metric.Must(meter).NewInt64Counter("total_node_publish", metric.WithDescription("Total number of node publish calls"))
-	nodeUnPublishTotal = metric.Must(meter).NewInt64Counter("total_node_unpublish", metric.WithDescription("Total number of node unpublish calls"))
-	nodePublishErrorTotal = metric.Must(meter).NewInt64Counter("total_node_publish_error", metric.WithDescription("Total number of node publish calls with error"))
-	nodeUnPublishErrorTotal = metric.Must(meter).NewInt64Counter("total_node_unpublish_error", metric.WithDescription("Total number of node unpublish calls with error"))
-	syncK8sSecretTotal = metric.Must(meter).NewInt64Counter("total_sync_k8s_secret", metric.WithDescription("Total number of k8s secrets synced"))
-	syncK8sSecretDuration = metric.Must(meter).NewFloat64ValueRecorder("sync_k8s_secret_duration_sec", metric.WithDescription("Distribution of how long it took to sync k8s secret"))
-	return &reporter{meter: meter}
+	if nodePublishTotal, err = meter.Int64Counter("total_node_publish", instrument.WithDescription("Total number of node publish calls")); err != nil {
+		return nil, err
+	}
+	if nodeUnPublishTotal, err = meter.Int64Counter("total_node_unpublish", instrument.WithDescription("Total number of node unpublish calls")); err != nil {
+		return nil, err
+	}
+	if nodePublishErrorTotal, err = meter.Int64Counter("total_node_publish_error", instrument.WithDescription("Total number of node publish calls with error")); err != nil {
+		return nil, err
+	}
+	if nodeUnPublishErrorTotal, err = meter.Int64Counter("total_node_unpublish_error", instrument.WithDescription("Total number of node unpublish calls with error")); err != nil {
+		return nil, err
+	}
+	if syncK8sSecretTotal, err = meter.Int64Counter("total_sync_k8s_secret", instrument.WithDescription("Total number of k8s secrets synced")); err != nil {
+		return nil, err
+	}
+	if syncK8sSecretDuration, err = meter.Float64Histogram("sync_k8s_secret_duration_sec", instrument.WithDescription("Distribution of how long it took to sync k8s secret")); err != nil {
+		return nil, err
+	}
+	return &reporter{}, nil
 }
 
-func (r *reporter) ReportNodePublishCtMetric(provider string) {
-	labels := []attribute.KeyValue{attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS)}
-	nodePublishTotal.Add(context.Background(), 1, labels...)
+func (r *reporter) ReportNodePublishCtMetric(ctx context.Context, provider string) {
+	nodePublishTotal.Add(ctx, 1, attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS))
 }
 
-func (r *reporter) ReportNodeUnPublishCtMetric() {
-	nodeUnPublishTotal.Add(context.Background(), 1, []attribute.KeyValue{attribute.String(osTypeKey, runtimeOS)}...)
+func (r *reporter) ReportNodeUnPublishCtMetric(ctx context.Context) {
+	nodeUnPublishTotal.Add(ctx, 1, attribute.String(osTypeKey, runtimeOS))
 }
 
-func (r *reporter) ReportNodePublishErrorCtMetric(provider, errType string) {
-	labels := []attribute.KeyValue{attribute.String(providerKey, provider), attribute.String(errorKey, errType), attribute.String(osTypeKey, runtimeOS)}
-	nodePublishErrorTotal.Add(context.Background(), 1, labels...)
+func (r *reporter) ReportNodePublishErrorCtMetric(ctx context.Context, provider, errType string) {
+	nodePublishErrorTotal.Add(ctx, 1, attribute.String(providerKey, provider), attribute.String(errorKey, errType), attribute.String(osTypeKey, runtimeOS))
 }
 
-func (r *reporter) ReportNodeUnPublishErrorCtMetric() {
-	nodeUnPublishErrorTotal.Add(context.Background(), 1, []attribute.KeyValue{attribute.String(osTypeKey, runtimeOS)}...)
+func (r *reporter) ReportNodeUnPublishErrorCtMetric(ctx context.Context) {
+	nodeUnPublishErrorTotal.Add(ctx, 1, attribute.String(osTypeKey, runtimeOS))
 }
 
-func (r *reporter) ReportSyncK8SecretCtMetric(provider string, count int) {
-	labels := []attribute.KeyValue{attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS)}
-	syncK8sSecretTotal.Add(context.Background(), int64(count), labels...)
+func (r *reporter) ReportSyncK8SecretCtMetric(ctx context.Context, provider string, count int) {
+	syncK8sSecretTotal.Add(ctx, int64(count), attribute.String(providerKey, provider), attribute.String(osTypeKey, runtimeOS))
 }
 
-func (r *reporter) ReportSyncK8SecretDuration(duration float64) {
-	r.meter.RecordBatch(context.Background(), []attribute.KeyValue{attribute.String(osTypeKey, runtimeOS)}, syncK8sSecretDuration.Measurement(duration))
+func (r *reporter) ReportSyncK8SecretDuration(ctx context.Context, duration float64) {
+	syncK8sSecretDuration.Record(ctx, duration, attribute.String(osTypeKey, runtimeOS))
 }

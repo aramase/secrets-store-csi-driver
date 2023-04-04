@@ -67,13 +67,17 @@ func newTestReconciler(client client.Reader, s *runtime.Scheme, kubeClient kuber
 	if err != nil {
 		return nil, err
 	}
+	sr, err := newStatsReporter()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Reconciler{
 		providerVolumePath:   socketPath,
 		rotationPollInterval: rotationPollInterval,
 		providerClients:      secretsstore.NewPluginClientBuilder([]string{socketPath}),
 		queue:                workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
-		reporter:             newStatsReporter(),
+		reporter:             sr,
 		eventRecorder:        fakeRecorder,
 		kubeClient:           kubeClient,
 		crdClient:            crdClient,
