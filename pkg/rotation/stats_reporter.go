@@ -49,12 +49,12 @@ type StatsReporter interface {
 func newStatsReporter() (StatsReporter, error) {
 	var err error
 	r := &reporter{}
-	meter := global.Meter("rotation")
+	meter := global.Meter("secretsstore")
 
-	if r.rotationReconcileTotal, err = meter.Int64Counter("total_rotation_reconcile", instrument.WithDescription("Total number of rotation reconciles")); err != nil {
+	if r.rotationReconcileTotal, err = meter.Int64Counter("rotation_reconcile", instrument.WithDescription("Total number of rotation reconciles")); err != nil {
 		return nil, err
 	}
-	if r.rotationReconcileErrorTotal, err = meter.Int64Counter("total_rotation_reconcile_error", instrument.WithDescription("Total number of rotation reconciles with error")); err != nil {
+	if r.rotationReconcileErrorTotal, err = meter.Int64Counter("rotation_reconcile_error", instrument.WithDescription("Total number of rotation reconciles with error")); err != nil {
 		return nil, err
 	}
 	if r.rotationReconcileDuration, err = meter.Float64Histogram("rotation_reconcile_duration_sec", instrument.WithDescription("Distribution of how long it took to rotate secrets-store content for pods")); err != nil {
