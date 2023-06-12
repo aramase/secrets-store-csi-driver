@@ -132,8 +132,12 @@ func mainErr() error {
 		Scheme:             scheme,
 		MetricsBindAddress: *metricsAddr,
 		LeaderElection:     false,
-		MapperProvider: func(c *rest.Config) (meta.RESTMapper, error) {
-			return apiutil.NewDynamicRESTMapper(c, apiutil.WithLazyDiscovery)
+		MapperProvider: func(c *rest.Config, httpClient *http.Client) (meta.RESTMapper, error) {
+			httpClient, err := rest.HTTPClientFor(c)
+			if err != nil {
+				return nil, err
+			}
+			return apiutil.NewDynamicRESTMapper(c, httpClient)
 		},
 		NewCache: cache.BuilderWithOptions(cache.Options{
 			SelectorsByObject: cache.SelectorsByObject{
