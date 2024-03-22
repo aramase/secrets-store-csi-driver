@@ -47,6 +47,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -129,10 +130,12 @@ func mainErr() error {
 	cfg.UserAgent = version.GetUserAgent("controller")
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: *metricsAddr,
-		LeaderElection:     false,
-		MapperProvider: func(c *rest.Config) (meta.RESTMapper, error) {
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: *metricsAddr,
+		},
+		LeaderElection: false,
+		MapperProvider: func(c *rest.Config, httpClient *http.Client) (meta.RESTMapper, error) {
 			return apiutil.NewDynamicRESTMapper(c, apiutil.WithLazyDiscovery)
 		},
 		NewCache: cache.BuilderWithOptions(cache.Options{
