@@ -65,6 +65,7 @@ type SecretProviderClassPodStatusReconciler struct {
 	writer        client.Writer
 	eventRecorder record.EventRecorder
 	driverName    string
+	reporter      StatsReporter
 }
 
 // New creates a new SecretProviderClassPodStatusReconciler
@@ -73,6 +74,10 @@ func New(driverName string, mgr manager.Manager, nodeID string) (*SecretProvider
 	kubeClient := kubernetes.NewForConfigOrDie(mgr.GetConfig())
 	eventBroadcaster.StartRecordingToSink(&clientcorev1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "csi-secrets-store-controller"})
+	reporter, err := newStatsReporter()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stats reporter: %w", err)
+	}
 
 	return &SecretProviderClassPodStatusReconciler{
 		Client:        mgr.GetClient(),
@@ -83,6 +88,7 @@ func New(driverName string, mgr manager.Manager, nodeID string) (*SecretProvider
 		writer:        mgr.GetClient(),
 		eventRecorder: recorder,
 		driverName:    driverName,
+		reporter:      reporter,
 	}, nil
 }
 
@@ -265,6 +271,9 @@ func (r *SecretProviderClassPodStatusReconciler) Reconcile(ctx context.Context, 
 		klog.InfoS("no secret objects defined for spc, nothing to reconcile", "spc", klog.KObj(spc), "spcps", klog.KObj(spcPodStatus))
 		return ctrl.Result{}, nil
 	}
+
+	// If secretObjects are defined in the SPC, record the time taken to reconcile
+	begin := time.Now()
 
 	// determine which pod volume this is associated with
 	podVol := k8sutil.SPCVolume(pod, r.driverName, spc.Name)
