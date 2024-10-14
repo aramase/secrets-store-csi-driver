@@ -35,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
-	mount "k8s.io/mount-utils"
+	"k8s.io/mount-utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -56,7 +56,7 @@ func testNodeServer(t *testing.T, client client.Client, reporter StatsReporter) 
 	t.Cleanup(server.Stop)
 
 	providerClients := NewPluginClientBuilder([]string{socketPath})
-	return newNodeServer("testnode", mount.NewFakeMounter([]mount.MountPoint{}), providerClients, client, client, reporter, k8s.NewTokenClient(fakeclient.NewSimpleClientset(), "test-driver", 1*time.Second))
+	return newNodeServer("testnode", mount.NewFakeMounter([]mount.MountPoint{}), providerClients, client, client, reporter, k8s.NewTokenClient(fakeclient.NewClientset(), "test-driver", 1*time.Second))
 }
 
 func TestNodePublishVolume_Errors(t *testing.T) {
