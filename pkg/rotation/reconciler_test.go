@@ -544,9 +544,10 @@ func TestReconcileNoError(t *testing.T) {
 		}
 		podToAdd := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod1",
-				Namespace: "default",
-				UID:       types.UID("foo"),
+				Name:       "pod1",
+				Namespace:  "default",
+				UID:        types.UID("foo"),
+				Finalizers: []string{},
 			},
 			Spec: corev1.PodSpec{
 				Volumes: []corev1.Volume{
@@ -649,7 +650,7 @@ func TestReconcileNoError(t *testing.T) {
 		// test with pod being in succeeded phase
 		podToAdd.DeletionTimestamp = nil
 		podToAdd.Status.Phase = corev1.PodSucceeded
-		kubeClient = fake.NewSimpleClientset(podToAdd, test.nodePublishSecretRefSecretToAdd)
+		kubeClient = fake.NewClientset(podToAdd, test.nodePublishSecretRefSecretToAdd)
 		initObjects = []client.Object{
 			podToAdd,
 			test.nodePublishSecretRefSecretToAdd,

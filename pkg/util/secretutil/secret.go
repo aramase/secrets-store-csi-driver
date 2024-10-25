@@ -23,10 +23,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"os"
 	"sort"
 	"strings"
+	"unsafe"
 
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
@@ -224,16 +224,28 @@ func GetSHAFromSecret(data map[string][]byte) (string, error) {
 	// sort the values to always obtain a deterministic SHA for
 	// same content in different order
 	sort.Strings(values)
+	fmt.Println(values)
 	return generateSHA(strings.Join(values, ";"))
 }
 
 // generateSHA generates SHA from string
 func generateSHA(data string) (string, error) {
+	fmt.Println(data)
 	hasher := sha256.New()
-	_, err := io.WriteString(hasher, data)
-	if err != nil {
+	if _, err := hasher.Write([]byte(data)); err != nil {
 		return "", err
 	}
-	sha := hasher.Sum(nil)
-	return fmt.Sprintf("%x", sha), nil
+	sha := toString(hasher.Sum(nil))
+	return sha, nil
+}
+
+// toString performs unholy acts to avoid allocations
+func toString(b []byte) string {
+	// unsafe.SliceData relies on cap whereas we want to rely on len
+	if len(b) == 0 {
+		return ""
+	}
+	// Copied from go 1.20.1 strings.Builder.String
+	// https://github.com/golang/go/blob/202a1a57064127c3f19d96df57b9f9586145e21c/src/strings/builder.go#L48
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
