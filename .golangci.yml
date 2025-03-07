@@ -1,10 +1,6 @@
 run:
   timeout: 5m
-  go: "1.20"
-  skip-files:
-  - "zz_generated.*\\.go$"
-  - "pkg/util/fileutil/atomic_writer.go"
-  - "pkg/util/fileutil/atomic_writer_test.go"
+  go: "1.24"
 
 linters-settings:
   gocritic:
@@ -14,14 +10,18 @@ linters-settings:
     line-length: 200
   misspell:
     locale: US
-  staticcheck:
-    go: "1.20"
+  revive:
+    rules:
+    - name: dot-imports
+      arguments:
+        # dot import should be ONLY allowed for ginkgo testing packages
+        - allowedPackages:
+          - "github.com/onsi/gomega"
 
 linters:
   disable-all: true
   enable:
     - durationcheck
-    - exportloopref
     - errcheck
     - errorlint
     - exhaustive
@@ -53,6 +53,10 @@ issues:
     - text: "unused-parameter: parameter '.*' seems to be unused, consider removing or renaming it as _"
       linters:
         - revive
+  exclude-files:
+    - "zz_generated.*\\.go$"
+    - "pkg/util/fileutil/atomic_writer.go"
+    - "pkg/util/fileutil/atomic_writer_test.go"
 
   # default: 3
   max-same-issues: 0
