@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 	"sigs.k8s.io/secrets-store-csi-driver/controllers"
 	"sigs.k8s.io/secrets-store-csi-driver/pkg/k8s"
@@ -132,12 +134,9 @@ func mainErr() error {
 			BindAddress: *metricsAddr,
 		},
 		LeaderElection: false,
-		// TODO(aramase): fix missing mapper
-		//MapperProvider: func(c *rest.Config) (meta.RESTMapper, error) {
-		//	return apiutil.NewDynamicRESTMapper(c, apiutil.WithLazyDiscovery)
-		//},
-		NewCache: cache.BuilderWithOptions(cache.Options{
-			SelectorsByObject: cache.SelectorsByObject{
+		MapperProvider: apiutil.NewDynamicRESTMapper,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
 				// this enables filtered watch of pods based on the node name
 				// only pods running on the same node as the csi driver will be cached
 				&corev1.Pod{}: {
@@ -162,7 +161,7 @@ func mainErr() error {
 					),
 				},
 			},
-		}),
+		},
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to start manager")
